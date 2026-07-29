@@ -432,6 +432,25 @@ export default defineContentScript({
     background: linear-gradient(180deg, #fff, #4ade80); -webkit-background-clip: text;
     -webkit-text-fill-color: transparent; margin-bottom: 6px; }
   .ms-locked-sub { font-size: 13px; color: rgba(255,255,255,0.65); letter-spacing: -0.005em; }
+  .ms-locked-cta {
+    pointer-events: auto; cursor: pointer;
+    display: block; margin-left: auto; margin-right: auto;
+    margin-top: 16px; padding: 10px 18px;
+    border: none; border-radius: 10px;
+    background: linear-gradient(180deg, #ffe07a 0%, #ffc83d 100%);
+    color: #1a1500; font-weight: 700; font-size: 13px; letter-spacing: -0.01em;
+    font-family: inherit;
+    box-shadow: 0 2px 10px rgba(255,217,90,0.3);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .ms-locked-cta:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(255,217,90,0.45); }
+  .ms-locked-cta-ghost {
+    margin-top: 8px; padding: 8px 16px;
+    background: transparent; color: rgba(255,255,255,0.78);
+    border: 1px solid rgba(255,255,255,0.22); box-shadow: none; font-weight: 600;
+  }
+  .ms-locked-cta-ghost:hover { transform: translateY(-1px); box-shadow: none;
+    background: rgba(255,255,255,0.06); color: #fff; }
 
   /* ---------- PANEL ---------- */
   .ms-panel {
@@ -975,24 +994,63 @@ export default defineContentScript({
       const label = currentMode === 'custom'
         ? `"${customDescription || 'Custom'}"`
         : (mode?.label || currentMode || '').toUpperCase();
+      // Restore defaults in case a free-limit / unavailable banner ran before.
+      (banner.querySelector('.ms-locked-icon') as HTMLElement).textContent = '🎯';
+      (banner.querySelector('.ms-locked-sub') as HTMLElement).textContent =
+        'Algorithm tuned · scrolling at natural pace';
       banner.querySelector('.ms-locked-title')!.textContent = `${label} LOCKED IN`;
+      banner.querySelector('.ms-locked-cta')?.remove();
       banner.classList.add('show');
       setTimeout(() => banner.classList.remove('show'), 4000);
     }
 
-    function showApiKeyMissingBanner() {
+    // First-100 free allotment (or spend cap) is used up. Offer the $10
+    // lifetime upgrade + the option to paste a personal OpenAI key.
+    function showFreeLimitBanner() {
       if (!shadow) return;
       const banner = shadow.getElementById('ms-locked-banner');
       if (!banner) return;
       const title = banner.querySelector('.ms-locked-title') as HTMLElement;
       const sub = banner.querySelector('.ms-locked-sub') as HTMLElement;
       const icon = banner.querySelector('.ms-locked-icon') as HTMLElement;
-      icon.textContent = '🔑';
-      title.textContent = 'ADD YOUR API KEY';
-      sub.innerHTML = 'Mood Scroll needs your own OpenAI key to classify videos.<br><br>Click the extension icon in Chrome\'s toolbar → Options → paste your <code>sk-...</code> key → Save.';
+      icon.textContent = '🎉';
+      title.textContent = 'FREE LIMIT REACHED';
+      sub.innerHTML =
+        'The first 100 free spots are taken. Get lifetime access for $10 and ' +
+        'add your own OpenAI key — then keep scrolling your way.';
+      banner.querySelector('.ms-locked-cta')?.remove();
+      const cta = document.createElement('button');
+      cta.className = 'ms-locked-cta';
+      cta.textContent = 'Get $10 lifetime →';
+      cta.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'open_site', path: '/#pricing' }).catch(() => {});
+      });
+      banner.appendChild(cta);
+      const cta2 = document.createElement('button');
+      cta2.className = 'ms-locked-cta ms-locked-cta-ghost';
+      cta2.textContent = 'Paste your key in Options';
+      cta2.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'open_options' }).catch(() => {});
+      });
+      banner.appendChild(cta2);
       banner.classList.add('show');
-      // Stays up until the user dismisses by clicking outside or picking a mode again
-      setTimeout(() => banner.classList.remove('show'), 12000);
+      setTimeout(() => banner.classList.remove('show'), 16000);
+    }
+
+    // Soft, no-action retry message for transient errors (proxy busy, network).
+    function showAiUnavailableBanner() {
+      if (!shadow) return;
+      const banner = shadow.getElementById('ms-locked-banner');
+      if (!banner) return;
+      const title = banner.querySelector('.ms-locked-title') as HTMLElement;
+      const sub = banner.querySelector('.ms-locked-sub') as HTMLElement;
+      const icon = banner.querySelector('.ms-locked-icon') as HTMLElement;
+      icon.textContent = '⏳';
+      title.textContent = 'TAKING A BREAK';
+      sub.textContent = 'The AI is busy for a moment. Hang tight — it’ll pick back up automatically.';
+      banner.querySelector('.ms-locked-cta')?.remove();
+      banner.classList.add('show');
+      setTimeout(() => banner.classList.remove('show'), 9000);
     }
 
     function showResetBanner() {
@@ -1008,6 +1066,7 @@ export default defineContentScript({
       icon.textContent = '🔄';
       title.textContent = 'RESET COMPLETE';
       sub.textContent = 'Refreshing feed… click "Refresh your For You feed" in the new tab too';
+      banner.querySelector('.ms-locked-cta')?.remove();
       banner.classList.add('show');
       setTimeout(() => {
         banner.classList.remove('show');
@@ -1102,6 +1161,7 @@ export default defineContentScript({
         icon.textContent = '✅';
         title.textContent = 'RESET DONE';
         sub.textContent = 'Pick a mode to start training a fresh algorithm';
+        banner.querySelector('.ms-locked-cta')?.remove();
         banner.classList.add('show');
         setTimeout(() => banner.classList.remove('show'), 4000);
       };
@@ -1317,14 +1377,17 @@ export default defineContentScript({
             }
             if (result?.error) {
               console.warn('[MoodScroll] classify error:', result.error);
-              // Surface no-API-key errors visibly so users don't think the
-              // extension is broken. Pauses the current mode and shows a
-              // persistent banner with a button to open the options page.
-              if (typeof result.error === 'string' && /api key/i.test(result.error)) {
-                showApiKeyMissingBanner();
+              if (result.error === 'free_limit_reached') {
+                // First-100 free pool (or spend cap) exhausted. Stop the mode
+                // and show the upgrade / paste-your-key banner.
+                showFreeLimitBanner();
                 currentMode = null;
                 chrome.storage.local.set({ currentMode: null }).catch(() => {});
                 updateOverlayState();
+              } else {
+                // Transient (proxy busy / network): soft banner, keep the mode
+                // so it recovers on the next video automatically.
+                showAiUnavailableBanner();
               }
               isClassifying = false;
               return;

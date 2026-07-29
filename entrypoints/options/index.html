@@ -56,57 +56,106 @@
     }
     #status.show { opacity: 1; }
     .preset-note {
-      background: rgba(255,217,90,0.08); border: 0.5px solid rgba(255,217,90,0.2);
-      border-radius: 10px; padding: 14px 16px; margin-bottom: 24px;
-      font-size: 12.5px; color: var(--text);
+      background: rgba(52,211,153,0.08); border: 0.5px solid rgba(52,211,153,0.25);
+      border-radius: 10px; padding: 16px 18px; margin-bottom: 24px;
+      font-size: 13px; color: var(--text); line-height: 1.6;
     }
-    .preset-note b { color: var(--accent); }
+    .preset-note b { color: var(--success); }
+    .steps { margin: 8px 0 0; padding-left: 18px; color: var(--text-dim); font-size: 12.5px; line-height: 1.7; }
+    .steps b { color: var(--text); font-weight: 600; }
+    .field.primary input {
+      padding: 14px 16px; font-size: 15px;
+      border-color: rgba(255,217,90,0.45);
+      box-shadow: 0 0 0 3px rgba(255,217,90,0.08);
+    }
+    .field.primary label { color: var(--accent); }
+    .next-steps {
+      margin-top: 28px; padding-top: 20px;
+      border-top: 0.5px solid var(--border);
+      color: var(--text-dim); font-size: 13px; line-height: 1.6;
+    }
+    .next-steps b { color: var(--text); font-weight: 600; }
+    details.advanced {
+      border: 0.5px solid var(--border); border-radius: 12px;
+      padding: 4px 16px 0; margin-top: 8px;
+    }
+    details.advanced summary {
+      cursor: pointer; list-style: none; padding: 12px 0;
+      font-size: 12px; color: var(--text-dim); text-transform: uppercase;
+      letter-spacing: 0.05em; font-weight: 600;
+    }
+    details.advanced summary::-webkit-details-marker { display: none; }
+    details.advanced summary::before { content: '▸ '; color: var(--accent); }
+    details.advanced[open] summary::before { content: '▾ '; }
+    details.advanced .field:last-of-type { margin-bottom: 16px; }
+    .paid-card {
+      border: 0.5px solid var(--border); border-radius: 12px;
+      padding: 18px 18px 4px; margin-top: 8px;
+    }
+    .paid-card h2 {
+      font-size: 14px; margin: 0 0 4px; font-weight: 700; letter-spacing: -0.01em;
+    }
+    .paid-card .sub { color: var(--text-dim); font-size: 12.5px; margin-bottom: 14px; line-height: 1.55; }
+    .paid-card .actions { margin-top: 4px; margin-bottom: 14px; }
   </style>
 </head>
 <body>
   <h1>Mood Scroll</h1>
-  <div class="tagline">Pick a mode. We curate your feed in real time.</div>
+  <div class="tagline">Free for the first 100 — nothing to set up. It just works.</div>
 
   <div class="preset-note">
-    <b>You need your own OpenAI API key to use Mood Scroll.</b>
-    <br><br>
-    1. Go to <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a> (login or sign up — free)
-    <br>2. Create a new secret key and copy it (starts with <code>sk-</code>)
-    <br>3. Paste it below and click Save
-    <br><br>
-    You'll pay OpenAI directly. About <b>$0.005 per video classification</b> on gpt-4o — roughly $1 buys 200 videos.
+    <b>✓ You’re on the free tier.</b> The AI is fully managed — the key lives on
+    our server, so there’s <b>nothing to paste</b>. Just:
+    <ol class="steps">
+      <li>Open <b>tiktok.com/foryou</b></li>
+      <li>Click the <b>✨ Mood Scroll</b> button (bottom-right)</li>
+      <li>Pick a mood — done</li>
+    </ol>
   </div>
 
-  <div class="field">
-    <label for="apiKey">OpenAI API key</label>
-    <input type="text" id="apiKey" placeholder="sk-... (paste your key here)">
-    <div class="hint">
-      Sent as <code>Authorization: Bearer</code> header to OpenAI. Stored locally in your browser only — never uploaded anywhere else.
+  <div class="paid-card">
+    <h2>Got lifetime access? ($10)</h2>
+    <div class="sub">
+      After the first 100 free users, Mood Scroll is a one-time $10 and you bring
+      your own OpenAI key. Paste it here — it’s stored only in this browser
+      (<code>chrome.storage.local</code>), sent straight to OpenAI, and never to us.
+    </div>
+    <div class="field">
+      <label for="apiKey">Your OpenAI API key (optional)</label>
+      <input type="text" id="apiKey" placeholder="sk-… (leave blank to stay on the free tier)" autocomplete="off" spellcheck="false">
+      <div class="hint">
+        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">Get a key →</a>
+        Once set, your key is used directly and you’re no longer limited.
+      </div>
+    </div>
+    <div class="actions">
+      <button id="save">Save</button>
+      <span id="status">✓ Saved</span>
     </div>
   </div>
 
-  <div class="field">
-    <label for="proxyUrl">API endpoint</label>
-    <input type="text" id="proxyUrl" placeholder="https://api.openai.com">
-    <div class="hint">
-      OpenAI's API endpoint. Leave as-is unless you're routing through your own proxy.
+  <details class="advanced">
+    <summary>Advanced</summary>
+
+    <div class="field">
+      <label for="model">Model</label>
+      <select id="model">
+        <option value="gpt-4o">gpt-4o · default</option>
+        <option value="gpt-4o-mini">gpt-4o-mini · cheaper</option>
+        <option value="gpt-4-turbo">gpt-4-turbo · older flagship</option>
+      </select>
+      <div class="hint">Both tiers use gpt-4o by default.</div>
     </div>
-  </div>
 
-  <div class="field">
-    <label for="model">Model</label>
-    <select id="model">
-      <option value="gpt-4o">gpt-4o · default (flagship vision · best accuracy)</option>
-      <option value="gpt-4o-mini">gpt-4o-mini · cheaper (misclassifies edge cases)</option>
-      <option value="gpt-4-turbo">gpt-4-turbo · older flagship</option>
-    </select>
-    <div class="hint">gpt-4o is the recommended model — strong vision and fast classification.</div>
-  </div>
-
-  <div class="actions">
-    <button id="save">Save</button>
-    <span id="status">✓ saved</span>
-  </div>
+    <div class="field">
+      <label for="proxyUrl">AI endpoint</label>
+      <input type="text" id="proxyUrl" placeholder="https://mood-scroll.vercel.app/api/openai">
+      <div class="hint">
+        Free tier uses our managed proxy. If you set your own key above, leave
+        this as-is and it’ll call <code>https://api.openai.com</code> directly.
+      </div>
+    </div>
+  </details>
 
   <script type="module" src="./main.ts"></script>
 </body>

@@ -2,19 +2,14 @@
 
 Pick a mood. Mood Scroll classifies every TikTok video, auto-skips anything that doesn't match, and watches + likes the ones that do — training TikTok's algorithm to surface what you actually want.
 
-## What you need before installing
+## Free for the first 100 — nothing to set up
 
-**An API key.** You have two options:
+For the first 100 users, Mood Scroll is **free with zero setup — no key, no payment.**
+The AI is fully managed: frames go to our secure proxy, which holds the key
+server-side and runs the classification for you. You just install and open TikTok.
 
-### Option A — Use the key the extension owner sent you
-If someone gave you Mood Scroll along with a `sk-…` key, you'll paste it during setup. The default proxy URL is already configured for you.
-
-### Option B — Bring your own OpenAI key
-1. Go to https://platform.openai.com/api-keys (login or sign up — free)
-2. Create a new secret key, copy it (starts with `sk-`)
-3. During setup, paste it AND change the proxy URL to `https://api.openai.com`
-
-You'll pay OpenAI directly — about $0.005 per video classification with gpt-4o. ~$1 will get you ~200 videos.
+After the first 100 users it becomes a **one-time $10** and you bring your own
+OpenAI key (paste it in the extension's options — it stays in your browser).
 
 ## Install (60 seconds)
 
@@ -22,8 +17,12 @@ You'll pay OpenAI directly — about $0.005 per video classification with gpt-4o
 2. Open **chrome://extensions** in Chrome (or Brave / Arc / Edge).
 3. Toggle **Developer mode** ON (top-right corner).
 4. Click **Load unpacked** → select the unzipped **`chrome-mv3`** folder.
-5. Options page auto-opens. Paste your API key (Option A or B above), click **Save**.
-6. Open **tiktok.com/foryou** → yellow **✨** floating button appears bottom-right.
+5. Open **tiktok.com/foryou** → yellow **✨** floating button appears bottom-right.
+6. Click **✨** → pick a mood → it works. **No key to enter on the free tier.**
+
+> **Paid / lifetime ($10):** open the extension's options page and paste your own
+> OpenAI API key ([get one here](https://platform.openai.com/api-keys)). Once set,
+> the extension calls OpenAI directly with your key and you're no longer limited.
 
 ## The 8 modes
 
@@ -64,15 +63,16 @@ Visual modes (LARP / Baddies / Brain Rot / Fitness) skip steps 2-3 and go straig
 ## Privacy
 
 - Everything runs locally in your browser.
-- The only network request is to your chosen API endpoint with video frames + caption text.
-- Your API key, mode preference, and session data live in `chrome.storage.local` — never uploaded.
+- **Free tier:** video frames + caption text go to our managed proxy, which adds the key server-side and forwards to the model. We never store your browsing.
+- **Paid tier:** your own key and the frames go straight to OpenAI — never to our server.
+- Your key (if any), mode preference, and session data live in `chrome.storage.local` — never uploaded.
 - No tracking, no accounts, no analytics.
 
 ## If something breaks
 
 Open Chrome DevTools on the TikTok page (`⌘+⌥+I` → Console tab). Look for `[MoodScroll]` lines:
-- `[MoodScroll] classify error: ... 401` → API key is wrong or missing
-- `[MoodScroll] classify error: ... 402` → out of credit (top up your key)
+- `[MoodScroll] classify error: free_limit_reached` → the first-100 free pool is used up; get $10 lifetime and paste your own key in options
+- `[MoodScroll] BYO classify error: ... 401` → your own OpenAI key is wrong
 - `[MoodScroll] MATCH: ...` / `SKIP: ...` → classifier is working
 - Nothing logged → extension isn't injecting; refresh chrome://extensions ⟳ and the tab
 

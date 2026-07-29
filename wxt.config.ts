@@ -8,13 +8,16 @@ export default defineConfig({
     description: 'Pick a mode. We scroll for you.',
     version: '1.0.0',
     permissions: ['storage', 'activeTab', 'scripting', 'tabs'],
-    // tiktok.com is the only host we need at install time (for the content
-    // script). MV3 background service workers can fetch ANY URL without
-    // host_permissions — so api.openai.com, anthropic, or any custom
-    // proxy URL the user sets all work without being declared here.
-    // This keeps the Chrome Web Store review surface minimal.
+    // tiktok.com — for the content script.
+    // api.openai.com — PAID/BYO path only: lets the MV3 background worker call
+    // OpenAI DIRECTLY with the buyer's own key. Declaring the host is required
+    // to bypass CORS (api.openai.com sends no permissive CORS headers). The
+    // free tier instead hits our managed proxy, which DOES send CORS headers,
+    // so no host permission is needed for it. A buyer's key only ever travels
+    // from their browser to OpenAI — never to our server.
     host_permissions: [
-      'https://www.tiktok.com/*'
+      'https://www.tiktok.com/*',
+      'https://api.openai.com/*'
     ]
   }
 });

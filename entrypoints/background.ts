@@ -208,10 +208,18 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-// Hits OpenAI directly with the user's own key by default. The proxy
-// URL can be changed in the options page to point at any compatible
-// endpoint (e.g. an Anthropic-style / LiteLLM proxy).
-const DEFAULT_PROXY_URL = 'https://api.openai.com';
+// Managed Mood Scroll proxy by default: the extension talks to our server,
+// which holds the real OpenAI key (a server-side env var) and calls OpenAI for
+// it. Users paste nothing — it works free out of the box. A LOW-VALUE shared
+// app token (baked in at build time via WXT_APP_TOKEN) is sent as the bearer
+// so the proxy can reject random internet traffic and keep spend bounded. That
+// token only unlocks the rate/spend-capped proxy — it is NOT the OpenAI key,
+// so it is safe to ship inside the extension. Power users can override the
+// endpoint/key in Options → Advanced.
+const ENV = import.meta.env as unknown as Record<string, string | undefined>;
+const DEFAULT_PROXY_URL =
+  ENV.WXT_PROXY_URL || 'https://mood-scroll.vercel.app/api/openai';
+const DEFAULT_APP_TOKEN = ENV.WXT_APP_TOKEN || '';
 const DEFAULT_MODEL = 'gpt-4o';
 
 // Mode-specific prompts — focused yes/no instead of the giant taxonomy.
@@ -333,6 +341,7 @@ async function classifyWithClaude(args: {
   apiKey: string;
   proxyUrl?: string;
   model?: string;
+  installId?: string;
 }) {
   const stripPrefix = (dataUrl: string) =>
     dataUrl.replace(/^data:image\/jpeg;base64,/, '');
@@ -355,21 +364,30 @@ async function classifyWithClaude(args: {
   const baseUrl = (args.proxyUrl || DEFAULT_PROXY_URL).replace(/\/+$/, '');
   const modelToUse = args.model || DEFAULT_MODEL;
 
-  // Auto-detect API format by URL. OpenAI direct → use chat-completions.
-  // Anything else (any LiteLLM-style Anthropic proxy) → use the
-  // Anthropic /v1/messages format with x-api-key auth.
-  const useOpenAIFormat = /api\.openai\.com/i.test(baseUrl);
+  // Our managed proxy and OpenAI both speak the Chat Completions format, so
+  // that is the default. Only fall back to the Anthropic /v1/messages shape
+  // for explicit LiteLLM-style endpoints a power user might configure.
+  const useAnthropicFormat = /anthropic|\/messages|litellm/i.test(baseUrl);
+  const useOpenAIFormat = !useAnthropicFormat;
 
   if (useOpenAIFormat) {
+    // Frames are sent at the model's DEFAULT detail (no detail override) — the
+    // proxy's hard spend cap is the budget backstop, so per-call resolution is
+    // left at full quality for the best classification accuracy.
     const imageParts = (args.frames || []).map(frame => ({
       type: 'image_url' as const,
-      image_url: { url: frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}` }
+      image_url: {
+        url: frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}`
+      }
     }));
     const res = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'authorization': `Bearer ${args.apiKey}`
+        'authorization': `Bearer ${args.apiKey}`,
+        // Anonymous install id — only used by OUR proxy for the first-100-free
+        // gate. Harmless to upstreams that ignore unknown headers.
+        ...(args.installId ? { 'x-ms-install': args.installId } : {})
       },
       body: JSON.stringify({
         model: modelToUse,
@@ -516,6 +534,21 @@ export default defineBackground(() => {
         .catch(err => sendResponse({ ok: false, error: String(err?.message ?? err) }));
       return true;
     }
+    if (msg.type === 'open_options') {
+      // Content scripts can't call openOptionsPage directly — relay it here so
+      // a banner can jump the user straight to setup (paste-your-key, etc.).
+      try { chrome.runtime.openOptionsPage(); sendResponse({ ok: true }); }
+      catch (err: any) { sendResponse({ ok: false, error: String(err?.message ?? err) }); }
+      return true;
+    }
+    if (msg.type === 'open_site') {
+      // Opens the marketing site (e.g. pricing) when the free limit is hit.
+      const path = typeof msg.path === 'string' ? msg.path : '';
+      chrome.tabs.create({ url: `https://mood-scroll.vercel.app${path}` })
+        .then(() => sendResponse({ ok: true }))
+        .catch(err => sendResponse({ ok: false, error: String(err?.message ?? err) }));
+      return true;
+    }
     if (msg.type === 'open_tiktok_settings') {
       // TikTok's "Refresh your For You feed" lives in Content Preferences.
       // Opens in a new tab so the user can click the refresh button themselves
@@ -593,19 +626,54 @@ export default defineBackground(() => {
     }
   }
 
+  // Stable anonymous id, generated once and stored locally. Used only by our
+  // proxy to count distinct free installs (the first-100 gate). Never PII.
+  async function getInstallId(): Promise<string> {
+    const { installId } = await chrome.storage.local.get('installId');
+    if (installId) return installId as string;
+    const id = 'ms_' + (globalThis.crypto?.randomUUID?.()
+      ?? (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+    await chrome.storage.local.set({ installId: id });
+    return id;
+  }
+
   async function handleClassify(msg: any) {
     const { apiKey, proxyUrl, model } = await chrome.storage.local.get(['apiKey', 'proxyUrl', 'model']);
-    if (!apiKey) return { error: 'No API key. Open the options page.' };
+    const personalKey = (apiKey || '').trim();
+    const chosenModel = model || DEFAULT_MODEL;
+
+    // PAID / BYO path: a personal OpenAI key is set → call OpenAI DIRECTLY with
+    // it. Their key never touches our server. If they left the managed proxy URL
+    // in place, route to api.openai.com so their key is actually used.
+    if (personalKey) {
+      const looksManaged = /mood-scroll|\/api\/openai/i.test(proxyUrl || '');
+      const base = (proxyUrl && proxyUrl.trim() && !looksManaged)
+        ? proxyUrl.trim()
+        : 'https://api.openai.com';
+      try {
+        return await classifyWithClaude({ ...msg, apiKey: personalKey, proxyUrl: base, model: chosenModel });
+      } catch (err: any) {
+        console.error('[MoodScroll] BYO classify error:', err);
+        return { error: String(err?.message ?? err) };
+      }
+    }
+
+    // FREE path: managed proxy with the baked low-value app token + install id.
+    const installId = await getInstallId();
     try {
       return await classifyWithClaude({
         ...msg,
-        apiKey,
+        apiKey: DEFAULT_APP_TOKEN,
         proxyUrl: proxyUrl || DEFAULT_PROXY_URL,
-        model: model || DEFAULT_MODEL
+        model: chosenModel,
+        installId
       });
     } catch (err: any) {
+      const m = String(err?.message ?? err);
+      // Proxy says the first-100 free allotment (or spend cap) is used up.
+      if (/free_limit_reached|\b402\b/.test(m)) return { error: 'free_limit_reached' };
       console.error('[MoodScroll] classify error:', err);
-      return { error: String(err?.message ?? err) };
+      return { error: m };
     }
   }
 
