@@ -15,6 +15,19 @@ Chrome extension that classifies every video on your For You feed, auto-likes ma
 
 Full install guide, all 8 modes, privacy notes, and troubleshooting: **[SETUP.md](./SETUP.md)**
 
+## Air Scroll
+
+Control TikTok with your hand, through your camera. Point one finger and flick:
+
+| Gesture | Action |
+|---------|--------|
+| Flick your pointing finger up | Next video |
+| Flick it down | Previous video |
+| Pinch thumb and finger | Like |
+| Hold up an open palm | Pause / play |
+
+Build from source (below) to get it. The first install opens a page that asks for the camera. Turn it on or off, change sensitivity, or flip the directions in the ✨ panel. Tracking runs on your computer with MediaPipe: video never leaves the extension, and the camera is on only while a TikTok tab is on screen.
+
 ## Modes
 
 | Mode | What it matches |

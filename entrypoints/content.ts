@@ -90,12 +90,18 @@ export default defineContentScript({
     }
     let autoAdvanceAt = 0; // when to advance the current matched video
 
+    // Air Scroll: a pause, or a flick back to an earlier video, must not be
+    // undone by the auto-advance and skip loops.
+    let airPaused = false;
+    let airPrevHoldUntil = 0;
+    const airHolding = () => airPaused || Date.now() < airPrevHoldUntil;
+
     // Loop watchdog: polls the currently matched video's currentTime. If the
     // video restarted (currentTime dropped), advance immediately so it never
     // plays again. Runs every 250ms when there's an active match hold.
     let watchedVideoLastTime = 0;
     setInterval(() => {
-      if (autoAdvanceAt === 0 || !currentMode || currentMode === 'auto_scroll') return;
+      if (autoAdvanceAt === 0 || !currentMode || currentMode === 'auto_scroll' || airHolding()) return;
       const video = findPlayingVideo();
       if (!video || !video.currentSrc) return;
       // If currentTime dropped by > 0.5s from last reading, it looped.
@@ -226,6 +232,26 @@ export default defineContentScript({
     };
 
     // ---------- INIT ----------
+    let airEnabled = false;
+    let airSensitivity = 'medium';
+    let airInvert = false;
+    chrome.storage.local.get(['airEnabled', 'airSensitivity', 'airInvert']).then(r => {
+      airEnabled = !!r.airEnabled;
+      airSensitivity = r.airSensitivity || 'medium';
+      airInvert = !!r.airInvert;
+      syncAirControls();
+      updateAirHud('no_hand', null);
+    });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes.airEnabled) return;
+      airEnabled = !!changes.airEnabled.newValue;
+      syncAirControls();
+      updateAirHud('no_hand', null);
+    });
+    document.addEventListener('visibilitychange', () => {
+      chrome.runtime.sendMessage({ type: 'air_reconcile' }).catch(() => {});
+    });
+
     chrome.storage.local.get(['currentMode', 'customDescription', 'autoEngage', 'sidekickActive']).then(r => {
       currentMode = r.currentMode || null;
       customDescription = r.customDescription || '';
@@ -235,7 +261,14 @@ export default defineContentScript({
       updateOverlayState();
     });
 
-    chrome.runtime.onMessage.addListener((msg) => {
+    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+      if (msg.type === 'air_visible') {
+        sendResponse({ visible: document.visibilityState === 'visible' });
+        return;
+      }
+      if (msg.type === 'air_frame') updateAirHud(msg.status, msg.pts);
+      if (msg.type === 'air_gesture' && document.visibilityState === 'visible') runAirGesture(msg.gesture);
+      if (msg.type === 'air_error') showAirError(msg.name);
       if (msg.type === 'set_mode') {
         currentMode = msg.mode;
         lastClassifiedVideoSrc = null;
@@ -555,6 +588,47 @@ export default defineContentScript({
   .ms-active-line.show { display: block; }
   .ms-active-line b { color: white; font-weight: 600; }
 
+  /* ---------- AIR SCROLL ---------- */
+  .ms-air-hud {
+    position: fixed; bottom: 80px; right: 84px; width: 112px; height: 84px;
+    border-radius: 12px; overflow: hidden; display: none;
+    background: rgba(22, 22, 24, 0.72);
+    border: 0.5px solid rgba(255,255,255,0.16);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    pointer-events: none;
+  }
+  .ms-air-hud.show { display: block; }
+  .ms-air-hud.error { pointer-events: auto; cursor: pointer; border-color: var(--danger); }
+  .ms-air-hud canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .ms-air-status {
+    position: absolute; left: 7px; right: 7px; bottom: 5px;
+    display: flex; align-items: center; gap: 5px;
+    font-size: 9.5px; font-weight: 500; color: var(--text-secondary); white-space: nowrap;
+  }
+  .ms-air-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); flex-shrink: 0; }
+  .ms-air-hud.found .ms-air-dot { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  .ms-air-hud.armed .ms-air-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .ms-air-hud.error .ms-air-dot { background: var(--danger); }
+  .ms-air-pop {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.8);
+    padding: 12px 22px; border-radius: 100px;
+    background: var(--bg-base); color: var(--text-primary);
+    font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+    border: 0.5px solid var(--border-strong);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.16s var(--ease), transform 0.22s var(--spring);
+  }
+  .ms-air-pop.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  .ms-air-select {
+    background: rgba(255,255,255,0.08); color: var(--text-primary);
+    border: 0.5px solid var(--border-subtle); border-radius: 6px;
+    font-size: 11px; padding: 2px 4px; font-family: inherit;
+  }
+
   /* ---------- PHASE INDICATOR ---------- */
   .ms-phase {
     background: rgba(255,255,255,0.04);
@@ -700,6 +774,8 @@ export default defineContentScript({
 </style>
 <button class="ms-toggle" id="ms-toggle" title="Mood Scroll — click to open"><span class="ms-pulse"></span><span id="ms-toggle-icon">✨</span></button>
 <div class="ms-flash" id="ms-flash"></div>
+<div class="ms-air-hud" id="ms-air-hud"><canvas id="ms-air-canvas" width="224" height="168"></canvas><div class="ms-air-status"><span class="ms-air-dot"></span><span id="ms-air-text"></span></div></div>
+<div class="ms-air-pop" id="ms-air-pop"></div>
 <div class="ms-locked-banner" id="ms-locked-banner">
   <div class="ms-locked-icon">🎯</div>
   <div class="ms-locked-title">LOCKED IN</div>
@@ -733,6 +809,28 @@ export default defineContentScript({
     <span>train algo (auto-like matches)</span>
     <label class="ms-switch">
       <input type="checkbox" id="ms-engage-toggle" />
+      <span class="ms-slider"></span>
+    </label>
+  </div>
+  <div class="ms-toggle-row">
+    <span>air scroll (camera)</span>
+    <label class="ms-switch">
+      <input type="checkbox" id="ms-air-toggle" />
+      <span class="ms-slider"></span>
+    </label>
+  </div>
+  <div class="ms-toggle-row">
+    <span>flick sensitivity</span>
+    <select class="ms-air-select" id="ms-air-sensitivity">
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+    </select>
+  </div>
+  <div class="ms-toggle-row">
+    <span>flip up and down</span>
+    <label class="ms-switch">
+      <input type="checkbox" id="ms-air-invert" />
       <span class="ms-slider"></span>
     </label>
   </div>
@@ -805,6 +903,25 @@ export default defineContentScript({
         autoEngage = engageToggle.checked;
         chrome.storage.local.set({ autoEngage });
       });
+
+      const airToggle = shadow.getElementById('ms-air-toggle') as HTMLInputElement;
+      const airSelect = shadow.getElementById('ms-air-sensitivity') as HTMLSelectElement;
+      const airInvertToggle = shadow.getElementById('ms-air-invert') as HTMLInputElement;
+      airToggle.addEventListener('change', () => {
+        chrome.storage.local.set({ airEnabled: airToggle.checked });
+      });
+      airSelect.addEventListener('change', () => {
+        airSensitivity = airSelect.value;
+        chrome.storage.local.set({ airSensitivity });
+      });
+      airInvertToggle.addEventListener('change', () => {
+        airInvert = airInvertToggle.checked;
+        chrome.storage.local.set({ airInvert });
+      });
+      shadow.getElementById('ms-air-hud')!.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'air_open_setup' }).catch(() => {});
+      });
+      syncAirControls();
 
       stopBtn.addEventListener('click', () => {
         currentMode = null;
@@ -898,6 +1015,127 @@ export default defineContentScript({
           }).catch(() => {});
           panel.classList.remove('open');
         });
+      }
+    }
+
+    // ---------- AIR SCROLL ----------
+    const HAND_BONES = [
+      [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
+      [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]
+    ];
+    const AIR_LABELS: Record<string, string> = {
+      no_hand: 'Show your hand',
+      too_far: 'Move closer',
+      hand: 'Point one finger',
+      pointing: 'Flick to scroll'
+    };
+    const AIR_POPS: Record<string, string> = {
+      next: '↑ Next', prev: '↓ Previous', like: '♥ Liked', pause: 'Paused', play: 'Playing'
+    };
+    let airPopTimer: number | null = null;
+
+    function syncAirControls() {
+      if (!shadow) return;
+      const toggle = shadow.getElementById('ms-air-toggle') as HTMLInputElement | null;
+      const select = shadow.getElementById('ms-air-sensitivity') as HTMLSelectElement | null;
+      const invert = shadow.getElementById('ms-air-invert') as HTMLInputElement | null;
+      if (toggle) toggle.checked = airEnabled;
+      if (select) select.value = airSensitivity;
+      if (invert) invert.checked = airInvert;
+    }
+
+    function updateAirHud(status: string, pts: number[][] | null) {
+      if (!shadow) return;
+      const hud = shadow.getElementById('ms-air-hud');
+      const text = shadow.getElementById('ms-air-text');
+      const canvas = shadow.getElementById('ms-air-canvas') as HTMLCanvasElement | null;
+      if (!hud || !text || !canvas) return;
+      hud.classList.toggle('show', airEnabled);
+      hud.classList.remove('error');
+      hud.classList.toggle('found', status === 'hand' || status === 'too_far');
+      hud.classList.toggle('armed', status === 'pointing');
+      text.textContent = AIR_LABELS[status] || '';
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!pts) return;
+      const px = (i: number): [number, number] => [pts[i][0] * canvas.width, pts[i][1] * canvas.height];
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+      ctx.beginPath();
+      for (const [a, b] of HAND_BONES) {
+        ctx.moveTo(...px(a));
+        ctx.lineTo(...px(b));
+      }
+      ctx.stroke();
+      ctx.fillStyle = status === 'pointing' ? '#ffd75a' : '#34d399';
+      ctx.beginPath();
+      ctx.arc(...px(8), 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function showAirError(name: string) {
+      if (!shadow) return;
+      const hud = shadow.getElementById('ms-air-hud');
+      const text = shadow.getElementById('ms-air-text');
+      if (!hud || !text) return;
+      hud.classList.add('show', 'error');
+      text.textContent = name === 'NotAllowedError' ? 'Camera blocked' : 'Camera failed';
+    }
+
+    function airPop(label: string) {
+      if (!shadow) return;
+      const pop = shadow.getElementById('ms-air-pop');
+      if (!pop) return;
+      pop.textContent = AIR_POPS[label] || label;
+      pop.classList.add('show');
+      if (airPopTimer) clearTimeout(airPopTimer);
+      airPopTimer = window.setTimeout(() => pop.classList.remove('show'), 650);
+    }
+
+    function airLike(video: HTMLVideoElement) {
+      const card = video.closest(CONFIG.itemSelector) as HTMLElement | null;
+      const scope: ParentNode = card || document;
+      const button = scope.querySelector<HTMLElement>(CONFIG.likeIconSelector)?.closest('button')
+        || scope.querySelector<HTMLButtonElement>(CONFIG.likeAriaSelector);
+      if (button) {
+        const label = (button.getAttribute('aria-label') || '').toLowerCase();
+        if (label.startsWith('unlike') || button.getAttribute('aria-pressed') === 'true') return;
+        button.click();
+      } else {
+        doubleTapVideo(video);
+      }
+      likedVideoSrcs.add(video.currentSrc);
+    }
+
+    function runAirGesture(gesture: string) {
+      const video = findPlayingVideo();
+      if (gesture === 'next' || gesture === 'prev') {
+        airPaused = false;
+        airPrevHoldUntil = gesture === 'prev' ? Date.now() + 20000 : 0;
+        // Auto Scroll re-times itself as soon as the new video appears.
+        autoAdvanceAt = currentMode === 'auto_scroll' ? Date.now() + 60000 : 0;
+        watchedVideoLastTime = 0;
+        // No target video: a flick always moves on from the card centered on screen.
+        skipToNext('', gesture === 'next' ? 1 : -1);
+        airPop(gesture);
+        return;
+      }
+      if (!video) return;
+      if (gesture === 'like') {
+        airLike(video);
+        airPop('like');
+      } else if (gesture === 'pause') {
+        if (video.paused) {
+          airPaused = false;
+          video.play().catch(() => {});
+          airPop('play');
+        } else {
+          airPaused = true;
+          video.pause();
+          airPop('pause');
+        }
       }
     }
 
@@ -1173,7 +1411,7 @@ export default defineContentScript({
     // This tick checks if the hold has expired and advances. Skipped from auto_scroll mode
     // because the auto-scroll loop manages its own advance.
     setInterval(() => {
-      if (!currentMode || currentMode === 'auto_scroll' || autoAdvanceAt === 0) return;
+      if (!currentMode || currentMode === 'auto_scroll' || autoAdvanceAt === 0 || airHolding()) return;
       if (Date.now() < autoAdvanceAt) return;
       const video = findPlayingVideo();
       if (!video) { autoAdvanceAt = 0; watchedVideoLastTime = 0; return; }
@@ -1187,7 +1425,7 @@ export default defineContentScript({
     let autoScrollSrc: string | null = null;
     setInterval(async () => {
       if (currentMode !== 'auto_scroll') { autoScrollSrc = null; return; }
-      if (autoScrollClassifying) return;
+      if (autoScrollClassifying || airHolding()) return;
       const video = findPlayingVideo();
       if (!video) return;
       const src = video.currentSrc;
@@ -1247,7 +1485,7 @@ export default defineContentScript({
     // ---------- CLASSIFY + SKIP LOOP ----------
     setInterval(async () => {
       try {
-        if (!currentMode || isClassifying) return;
+        if (!currentMode || isClassifying || airHolding()) return;
         if (currentMode === 'auto_scroll') return; // handled by auto-scroll loop above
         if (currentMode === 'custom' && !customDescription) return;
         if (Date.now() - lastDecisionAt < tuning().decisionIntervalMs) return;
@@ -1605,25 +1843,25 @@ export default defineContentScript({
       return frames;
     }
 
-    function skipToNext(targetSrc: string) {
-      tryAdvance(targetSrc);
+    function skipToNext(targetSrc: string, dir: 1 | -1 = 1) {
+      tryAdvance(targetSrc, dir);
       setTimeout(() => {
         const video = findPlayingVideo();
-        if (video && video.currentSrc === targetSrc) tryAdvance(targetSrc);
+        if (targetSrc && video && video.currentSrc === targetSrc) tryAdvance(targetSrc, dir);
       }, 400);
     }
 
-    function tryAdvance(targetSrc: string) {
+    function tryAdvance(targetSrc: string, dir: 1 | -1 = 1) {
       // Verified: no `[data-e2e="arrow-right"]` button exists on tiktok.com/foryou.
       // Primary: scrollIntoView the next snap item.
       const items = findFeedItems();
-      const currentItem = findItemContainingVideo(targetSrc) || items.find(i => {
+      const currentItem = (targetSrc ? findItemContainingVideo(targetSrc) : null) || items.find(i => {
         const r = i.getBoundingClientRect();
         return r.top < window.innerHeight / 2 && r.bottom > window.innerHeight / 2;
       });
       if (currentItem && items.length) {
         const idx = items.indexOf(currentItem);
-        const nextItem = idx >= 0 ? items[idx + 1] : null;
+        const nextItem = idx >= 0 ? items[idx + dir] : null;
         if (nextItem) {
           nextItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
           return;
@@ -1632,10 +1870,10 @@ export default defineContentScript({
       // Fallback: scroll the snap container by one viewport height.
       const container = document.getElementById(CONFIG.scrollContainerId);
       if (container) {
-        container.scrollBy({ top: container.clientHeight, behavior: 'smooth' });
+        container.scrollBy({ top: dir * container.clientHeight, behavior: 'smooth' });
         return;
       }
-      window.scrollBy({ top: window.innerHeight, behavior: 'smooth' });
+      window.scrollBy({ top: dir * window.innerHeight, behavior: 'smooth' });
     }
 
     // ---------- AUTO-LIKE ----------

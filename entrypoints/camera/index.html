@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mood Scroll: turn on Air Scroll</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0a0a0a; color: #f2f2f2;
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+    main { width: min(440px, calc(100vw - 48px)); }
+    h1 { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 6px; }
+    #status { color: #ffd75a; margin: 0 0 24px; min-height: 45px; }
+    ul { list-style: none; padding: 0; margin: 0 0 24px; border-top: 1px solid #262626; }
+    li { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid #262626; }
+    li span:last-child { color: #9a9a9a; text-align: right; }
+    button { width: 100%; padding: 13px; border: 0; border-radius: 10px; background: #ffd75a; color: #1a1500;
+      font: 600 15px -apple-system, system-ui, sans-serif; cursor: pointer; }
+    button[hidden] { display: none; }
+    small { display: block; margin-top: 16px; color: #777; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Air Scroll</h1>
+    <p id="status">Asking for your camera. Click Allow in the bar at the top.</p>
+    <ul>
+      <li><span>Flick your pointing finger up</span><span>Next video</span></li>
+      <li><span>Flick it down</span><span>Previous video</span></li>
+      <li><span>Pinch thumb and finger</span><span>Like</span></li>
+      <li><span>Hold up an open palm</span><span>Pause or play</span></li>
+    </ul>
+    <button id="go" hidden>Open TikTok</button>
+    <button id="retry" hidden>Try again</button>
+    <small>Video is processed on this computer and never leaves the extension. The camera runs only while TikTok is on screen.</small>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

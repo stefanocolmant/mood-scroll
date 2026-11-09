@@ -481,6 +481,7 @@ export default defineBackground(() => {
   chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
       chrome.runtime.openOptionsPage();
+      chrome.tabs.create({ url: chrome.runtime.getURL('camera.html') }).catch(() => {});
     }
     // On install AND update: reload any open TikTok tabs so the latest
     // content script kicks in immediately. Without this, refreshing the
@@ -499,7 +500,103 @@ export default defineBackground(() => {
     }
   });
 
+  // ---------- AIR SCROLL ----------
+  // The camera lives in an offscreen document that exists only while Air Scroll
+  // is on and a TikTok tab is actually on screen.
+  const AIR_OFFSCREEN = 'offscreen.html';
+  const AIR_GRACE_MS = 8000; // survive quick tab switches without restarting the camera
+  let airGrace: ReturnType<typeof setTimeout> | null = null;
+  let airQueue: Promise<void> = Promise.resolve();
+
+  async function airVisibleTabs(): Promise<number[]> {
+    const tabs = await chrome.tabs.query({ active: true, url: 'https://www.tiktok.com/*' });
+    const visible: number[] = [];
+    for (const tab of tabs) {
+      if (tab.id === undefined) continue;
+      const reply = await chrome.tabs.sendMessage(tab.id, { type: 'air_visible' }).catch(() => null);
+      if (reply?.visible) visible.push(tab.id);
+    }
+    return visible;
+  }
+
+  async function airShouldRun(): Promise<boolean> {
+    const { airEnabled } = await chrome.storage.local.get('airEnabled');
+    return !!airEnabled && (await airVisibleTabs()).length > 0;
+  }
+
+  async function airStop() {
+    if (await chrome.offscreen.hasDocument()) await chrome.offscreen.closeDocument();
+  }
+
+  function airReconcile() {
+    airQueue = airQueue.then(async () => {
+      const run = await airShouldRun();
+      if (run) {
+        if (airGrace) { clearTimeout(airGrace); airGrace = null; }
+        if (!(await chrome.offscreen.hasDocument())) {
+          await chrome.offscreen.createDocument({
+            url: AIR_OFFSCREEN,
+            reasons: [chrome.offscreen.Reason.USER_MEDIA],
+            justification: 'Read hand gestures from the camera to scroll TikTok.'
+          });
+        }
+        return;
+      }
+      const { airEnabled } = await chrome.storage.local.get('airEnabled');
+      if (!airEnabled) {
+        if (airGrace) { clearTimeout(airGrace); airGrace = null; }
+        await airStop();
+      } else if (!airGrace && await chrome.offscreen.hasDocument()) {
+        airGrace = setTimeout(() => {
+          airGrace = null;
+          airQueue = airQueue.then(async () => { if (!(await airShouldRun())) await airStop(); }).catch(() => {});
+        }, AIR_GRACE_MS);
+      }
+    }).catch(err => console.warn('[AirScroll] reconcile failed:', err));
+  }
+
+  async function airForward(msg: any) {
+    for (const id of await airVisibleTabs()) chrome.tabs.sendMessage(id, msg).catch(() => {});
+  }
+
+  chrome.tabs.onActivated.addListener(airReconcile);
+  chrome.tabs.onRemoved.addListener(airReconcile);
+  chrome.tabs.onUpdated.addListener((_id, info) => { if (info.status === 'complete' || info.url) airReconcile(); });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.airEnabled) airReconcile();
+    if (changes.airSensitivity || changes.airInvert) {
+      chrome.storage.local.get(['airSensitivity', 'airInvert']).then(r => {
+        chrome.runtime.sendMessage({ type: 'air_config', sensitivity: r.airSensitivity || 'medium', invert: !!r.airInvert }).catch(() => {});
+      });
+    }
+  });
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg.type === 'air_reconcile') {
+      airReconcile();
+      return;
+    }
+    if (msg.type === 'air_open_setup') {
+      chrome.tabs.create({ url: chrome.runtime.getURL('camera.html') }).catch(() => {});
+      return;
+    }
+    if (msg.type === 'air_get_config') {
+      chrome.storage.local.get(['airSensitivity', 'airInvert'])
+        .then(r => sendResponse({ sensitivity: r.airSensitivity || 'medium', invert: !!r.airInvert }));
+      return true;
+    }
+    if (msg.type === 'air_frame' || msg.type === 'air_gesture' || msg.type === 'air_started') {
+      airForward(msg);
+      return;
+    }
+    if (msg.type === 'air_error') {
+      console.warn('[AirScroll] camera error:', msg.name, msg.message);
+      airForward(msg);
+      chrome.storage.local.set({ airEnabled: false });
+      if (msg.name === 'NotAllowedError') chrome.tabs.create({ url: chrome.runtime.getURL('camera.html') }).catch(() => {});
+      return;
+    }
     if (msg.type === 'classify') {
       handleClassify(msg).then(sendResponse).catch(err => sendResponse({ error: err.message }));
       return true;

@@ -39,3 +39,6 @@ web-ext.config.ts
 .env
 .env.local
 .env.*.local
+
+# Hand-tracking runtime + model, fetched by scripts/fetch-mediapipe.mjs
+public/mediapipe/

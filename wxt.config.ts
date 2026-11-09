@@ -7,7 +7,11 @@ export default defineConfig({
     name: 'Mood Scroll',
     description: 'Pick a mode. We scroll for you.',
     version: '1.0.0',
-    permissions: ['storage', 'activeTab', 'scripting', 'tabs'],
+    permissions: ['storage', 'activeTab', 'scripting', 'tabs', 'offscreen'],
+    // wasm-unsafe-eval: the on-device hand tracker is WebAssembly.
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    },
     // tiktok.com — for the content script.
     // api.openai.com — PAID/BYO path only: lets the MV3 background worker call
     // OpenAI DIRECTLY with the buyer's own key. Declaring the host is required
