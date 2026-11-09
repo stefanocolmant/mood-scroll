@@ -10,7 +10,7 @@ export type AirStatus = 'no_hand' | 'too_far' | 'hand' | 'pointing';
 
 export const SENSITIVITY: Record<Sensitivity, { dist: number; speed: number }> = {
   low: { dist: 1.0, speed: 5.0 },
-  medium: { dist: 0.7, speed: 3.2 },
+  medium: { dist: 0.55, speed: 2.6 },
   high: { dist: 0.45, speed: 2.2 }
 };
 
@@ -38,11 +38,11 @@ function extended(p: Pt[], tip: number, pip: number): boolean {
   return dist(p[0], p[tip]) > dist(p[0], p[pip]) * 1.08;
 }
 
-export function readPose(p: Pt[]): { pointing: boolean; open: boolean } {
+export function readPose(p: Pt[]): { pointing: boolean; open: boolean; indexOut: boolean } {
   const index = extended(p, 8, 6);
   const others = [extended(p, 12, 10), extended(p, 16, 14), extended(p, 20, 18)];
   const othersOut = others.filter(Boolean).length;
-  return { pointing: index && othersOut <= 1, open: index && othersOut === 3 };
+  return { pointing: index && othersOut <= 1, open: index && othersOut === 3, indexOut: index };
 }
 
 type Sample = { t: number; x: number; y: number; pointing: boolean };
@@ -99,7 +99,7 @@ export class AirGestureDetector {
     } else if (this.last && prev && (tip.y - prev.y) * this.last.dir > TINY_STEP * this.scale) {
       this.strokeSpent = false; // moving against the last flick: that stroke is over
     }
-    this.samples.push({ t, x: tip.x, y: tip.y, pointing: pose.pointing });
+    this.samples.push({ t, x: tip.x, y: tip.y, pointing: pose.indexOut });
     while (this.samples.length && t - this.samples[0].t > WINDOW_MS) this.samples.shift();
 
     return this.checkPinch(t, p) || this.checkPalm(t, pose.open, stepSpeed) || this.checkFlick(t);

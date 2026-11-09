@@ -588,6 +588,11 @@ export default defineBackground(() => {
     }
     if (msg.type === 'air_frame' || msg.type === 'air_gesture' || msg.type === 'air_started') {
       airForward(msg);
+      if (msg.type === 'air_gesture') {
+        chrome.storage.local.get('airGestures').then(r => chrome.storage.local.set({
+          airGestures: { count: (r.airGestures?.count || 0) + 1, last: msg.gesture, at: Date.now() }
+        }));
+      }
       return;
     }
     if (msg.type === 'air_error') {

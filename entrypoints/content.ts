@@ -334,6 +334,19 @@ export default defineContentScript({
         main[id^="main-content"] * { visibility: hidden !important; }
         main[id^="main-content"] :is(video, canvas, img) { visibility: visible !important; }
         [data-e2e^="feed-navigation"] { display: none !important; }
+        /* The phone: a rounded screen with a notch, black everywhere else. */
+        body::after {
+          content: ''; position: fixed; z-index: 2147483646; pointer-events: none;
+          left: var(--ms-cx, 50%); top: 50%; transform: translate(-50%, -50%);
+          height: var(--ms-h, 94vh); aspect-ratio: 9 / 17.5; border-radius: 46px;
+          box-shadow: inset 0 0 0 9px #1c1c1e, inset 0 0 0 10px #48484a, 0 0 0 100vmax #000;
+        }
+        body::before {
+          content: ''; position: fixed; z-index: 2147483647; pointer-events: none;
+          left: var(--ms-cx, 50%); transform: translateX(-50%);
+          top: calc(50% - var(--ms-h, 94vh) / 2 + 20px);
+          width: 92px; height: 26px; border-radius: 14px; background: #000;
+        }
       ` : '');
       document.head.appendChild(style);
     }
@@ -341,15 +354,24 @@ export default defineContentScript({
       document.getElementById('moodscroll-sidekick-css')?.remove();
     }
 
-    // With every control hidden, the first click or key press turns the sound on.
+    // TikTok starts every video muted and the controls are hidden, so keep sound
+    // on. Browsers only allow audio once the page has had one click or key press.
     if (GESTURE_ONLY) {
-      const unmute = () => {
-        if (document.querySelector('video')?.muted) {
-          document.querySelector<HTMLElement>('[data-e2e="cinema-playback-control-volume"] button')?.click();
-        }
-      };
-      document.addEventListener('pointerdown', unmute, { capture: true });
-      document.addEventListener('keydown', unmute, { capture: true });
+      setInterval(() => {
+        if (!navigator.userActivation?.hasBeenActive) return;
+        document.querySelectorAll('video').forEach(v => {
+          if (v.muted) v.muted = false;
+          if (v.volume < 1) v.volume = 1;
+        });
+      }, 250);
+      // Keep the phone centered on the feed, wherever TikTok lays it out.
+      setInterval(() => {
+        const feed = document.getElementById(CONFIG.scrollContainerId)?.getBoundingClientRect();
+        if (!feed?.width) return;
+        const root = document.documentElement.style;
+        root.setProperty('--ms-cx', `${feed.left + feed.width / 2}px`);
+        root.setProperty('--ms-h', `${Math.min(feed.height, window.innerHeight) - 16}px`);
+      }, 500);
     }
 
     // ---------- OVERLAY UI (Shadow DOM) ----------

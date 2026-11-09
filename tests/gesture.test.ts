@@ -72,9 +72,11 @@ test('a sideways swipe does nothing', () => {
   const swipe = Array.from({ length: 6 }, (_, i) => [0.6 + i * 0.05, 0.7 - i * 0.03, 'point'] as [number, number, Pose]);
   assert.deepEqual(run([...rest(10), ...swipe]), []);
 });
-test('an open hand or a fist moving fast does not scroll', () => {
+test('a relaxed open hand swiping up scrolls', () => {
+  assert.deepEqual(run([...rest(3, 0.7, 0.6, 'open'), ...stroke(0.7, -0.2, 5, 0.6, 'open'), ...rest(5, 0.5, 0.6, 'fist')]), ['next']);
+});
+test('a fist moving fast does not scroll', () => {
   assert.deepEqual(run([...rest(10, 0.7, 0.6, 'fist'), ...stroke(0.7, -0.2, 5, 0.6, 'fist')]), []);
-  assert.deepEqual(run([...rest(3, 0.7, 0.6, 'open'), ...stroke(0.7, -0.2, 5, 0.6, 'open')]), []);
 });
 test('a one-frame tracking jump is not a flick', () => {
   assert.deepEqual(run([...rest(10), [0.6, 0.1, 'point'], ...rest(10, 0.1)]), []);
@@ -93,10 +95,10 @@ test('a short tracking dropout does not lose the flick', () => {
   assert.deepEqual(run([...rest(10), s[0], s[1], null, s[3], s[4], s[5], ...rest(20, 0.46)]), ['next']);
 });
 test('losing the hand clears the stroke', () => {
-  assert.deepEqual(run([...rest(10), ...stroke(0.7, -0.1, 3), ...Array(10).fill(null), ...rest(1, 0.3), ...rest(20, 0.3)]), []);
+  assert.deepEqual(run([...rest(10), ...stroke(0.7, -0.05, 3), ...Array(10).fill(null), ...rest(1, 0.3), ...rest(20, 0.3)]), []);
 });
 test('sensitivity changes how small a flick counts', () => {
-  const small = [...rest(10), ...stroke(0.7, -0.08, 3), ...rest(20, 0.62)];
+  const small = [...rest(10), ...stroke(0.7, -0.075, 3), ...rest(20, 0.625)];
   assert.deepEqual(run(small, { sensitivity: 'low' }), []);
   assert.deepEqual(run(small, { sensitivity: 'medium' }), []);
   assert.deepEqual(run(small, { sensitivity: 'high' }), ['next']);
