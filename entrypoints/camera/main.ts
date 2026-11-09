@@ -6,16 +6,16 @@ const retry = document.getElementById('retry') as HTMLButtonElement;
 
 async function ask() {
   retry.hidden = true;
-  status.textContent = 'Asking for your camera. Click Allow in the bar at the top.';
+  statusEl.textContent = 'Asking for your camera. Click Allow in the bar at the top.';
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     stream.getTracks().forEach(t => t.stop());
     await chrome.storage.local.set({ airEnabled: true });
-    status.textContent = 'Camera is ready. Air Scroll is on.';
+    statusEl.textContent = 'Camera is ready. Air Scroll is on.';
     go.hidden = false;
   } catch (err: any) {
     const bySystem = /system/i.test(String(err?.message));
-    status.textContent = err?.name === 'NotFoundError'
+    statusEl.textContent = err?.name === 'NotFoundError'
       ? 'No camera was found on this computer.'
       : bySystem
         ? 'macOS is blocking Chrome. Turn Chrome on in System Settings, Privacy & Security, Camera, then try again.'
