@@ -357,6 +357,7 @@ export default defineContentScript({
     // TikTok starts every video muted and the controls are hidden, so keep sound
     // on. Browsers only allow audio once the page has had one click or key press.
     if (GESTURE_ONLY) {
+      chrome.runtime.sendMessage({ type: 'unmute_tab' }).catch(() => {});
       setInterval(() => {
         if (!navigator.userActivation?.hasBeenActive) return;
         document.querySelectorAll('video').forEach(v => {
@@ -1165,6 +1166,7 @@ export default defineContentScript({
       }
       if (!video) return;
       if (gesture === 'like') {
+        if (GESTURE_ONLY) return; // this build never likes anything
         airLike(video);
         airPop('like');
       } else if (gesture === 'pause') {

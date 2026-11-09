@@ -573,6 +573,10 @@ export default defineBackground(() => {
   });
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg.type === 'unmute_tab') {
+      if (_sender.tab?.id !== undefined) chrome.tabs.update(_sender.tab.id, { muted: false }).catch(() => {});
+      return;
+    }
     if (msg.type === 'air_reconcile') {
       airReconcile();
       return;
