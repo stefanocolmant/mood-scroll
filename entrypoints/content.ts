@@ -1,4 +1,4 @@
-import { MODES, type ModeId } from '@/entrypoints/shared/modes';
+import { GESTURE_ONLY, MODES, type ModeId } from '@/entrypoints/shared/modes';
 import { tier1Classify } from '@/entrypoints/shared/tier1';
 
 export default defineContentScript({
@@ -253,11 +253,11 @@ export default defineContentScript({
     });
 
     chrome.storage.local.get(['currentMode', 'customDescription', 'autoEngage', 'sidekickActive']).then(r => {
-      currentMode = r.currentMode || null;
+      currentMode = GESTURE_ONLY ? null : (r.currentMode || null);
       customDescription = r.customDescription || '';
       autoEngage = r.autoEngage !== false; // default true
       sidekickActive = !!r.sidekickActive;
-      if (sidekickActive) applySidekickCSS();
+      if (sidekickActive || GESTURE_ONLY) applySidekickCSS();
       updateOverlayState();
     });
 
@@ -269,7 +269,7 @@ export default defineContentScript({
       if (msg.type === 'air_frame') updateAirHud(msg.status, msg.pts);
       if (msg.type === 'air_gesture' && document.visibilityState === 'visible') runAirGesture(msg.gesture);
       if (msg.type === 'air_error') showAirError(msg.name);
-      if (msg.type === 'set_mode') {
+      if (msg.type === 'set_mode' && !GESTURE_ONLY) {
         currentMode = msg.mode;
         lastClassifiedVideoSrc = null;
         resetPhase();
@@ -327,11 +327,29 @@ export default defineContentScript({
           display: none !important;
         }
         /* Mood Scroll's own collapsed button stays visible (z-index 2^31) */
-      `;
+      ` + (GESTURE_ONLY ? `
+        /* Nothing on the page but the picture itself. */
+        #app, #app > div, main { background: #000 !important; }
+        main[id^="main-content"] { margin-inline-start: 0 !important; left: 0 !important; width: 100% !important; max-width: none !important; }
+        main[id^="main-content"] * { visibility: hidden !important; }
+        main[id^="main-content"] :is(video, canvas, img) { visibility: visible !important; }
+        [data-e2e^="feed-navigation"] { display: none !important; }
+      ` : '');
       document.head.appendChild(style);
     }
     function removeSidekickCSS() {
       document.getElementById('moodscroll-sidekick-css')?.remove();
+    }
+
+    // With every control hidden, the first click or key press turns the sound on.
+    if (GESTURE_ONLY) {
+      const unmute = () => {
+        if (document.querySelector('video')?.muted) {
+          document.querySelector<HTMLElement>('[data-e2e="cinema-playback-control-volume"] button')?.click();
+        }
+      };
+      document.addEventListener('pointerdown', unmute, { capture: true });
+      document.addEventListener('keydown', unmute, { capture: true });
     }
 
     // ---------- OVERLAY UI (Shadow DOM) ----------
@@ -339,6 +357,7 @@ export default defineContentScript({
     let shadow: ShadowRoot | null = null;
 
     function ensureOverlay() {
+      if (GESTURE_ONLY) return;
       if (overlayRoot && document.documentElement.contains(overlayRoot)) return;
       // Remove any stale overlay from a previous content-script load. When
       // the extension is reloaded, the old overlay can persist in DOM with

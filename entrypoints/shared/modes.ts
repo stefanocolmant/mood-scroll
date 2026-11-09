@@ -1,3 +1,7 @@
+// Gesture-only build: the feed moves only when the user flicks a finger. No
+// auto-scroll or mood filtering, no overlays, nothing on screen but the video.
+export const GESTURE_ONLY = true;
+
 // `matches` = strict categories that fully qualify (used in Tuned phase).
 // `broadMatches` = broader content cluster (used in Training phase to push
 //                  TikTok's algorithm toward the niche via related-content

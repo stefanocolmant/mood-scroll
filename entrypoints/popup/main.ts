@@ -1,8 +1,19 @@
-import { MODES } from '@/entrypoints/shared/modes';
+import { GESTURE_ONLY, MODES } from '@/entrypoints/shared/modes';
 
 let currentMode: string | null = null;
 
+async function initGestureOnly() {
+  for (const id of ['modes-grid', 'stats', 'view-receipt', 'reset-link']) document.getElementById(id)!.style.display = 'none';
+  document.querySelector('.subtitle')!.textContent = 'flick your finger to scroll';
+  const row = document.getElementById('air-only')!;
+  const box = document.getElementById('air-on') as HTMLInputElement;
+  row.hidden = false;
+  box.checked = !!(await chrome.storage.local.get('airEnabled')).airEnabled;
+  box.addEventListener('change', () => chrome.storage.local.set({ airEnabled: box.checked }));
+}
+
 async function init() {
+  if (GESTURE_ONLY) return initGestureOnly();
   const stored = await chrome.storage.local.get(['currentMode', 'session']);
   currentMode = stored.currentMode || null;
   renderModes();
