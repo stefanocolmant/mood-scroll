@@ -358,7 +358,15 @@ export default defineContentScript({
     // TikTok starts every video muted and the controls are hidden, so keep sound
     // on. Browsers only allow audio once the page has had one click or key press.
     if (GESTURE_ONLY) {
-      chrome.runtime.sendMessage({ type: 'unmute_tab' }).catch(() => {});
+      // Retry: a window that is covered while the page loads cannot take the click.
+      let unlockTries = 0;
+      const unlockTimer = setInterval(() => {
+        if (navigator.userActivation?.hasBeenActive || ++unlockTries > 15) {
+          clearInterval(unlockTimer);
+        } else if (document.visibilityState === 'visible') {
+          chrome.runtime.sendMessage({ type: 'unmute_tab' }).catch(() => {});
+        }
+      }, 2000);
       setInterval(() => {
         if (!navigator.userActivation?.hasBeenActive) return;
         document.querySelectorAll('video').forEach(v => {
@@ -1163,7 +1171,7 @@ export default defineContentScript({
 
     function runAirGesture(gesture: string) {
       const video = findPlayingVideo();
-      if (gesture === 'prev' && GESTURE_ONLY) return; // forward only
+      if (GESTURE_ONLY && gesture !== 'next') return; // scroll forward is the only action
       if (gesture === 'next' || gesture === 'prev') {
         airPaused = false;
         airPrevHoldUntil = gesture === 'prev' ? Date.now() + 20000 : 0;

@@ -51,6 +51,8 @@ export class AirGestureDetector {
   status: AirStatus = 'no_hand';
   sensitivity: Sensitivity = 'medium';
   invert = false;
+  forwardOnly = false; // backward strokes are ignored entirely and leave no trace
+  anyHand = false;     // any hand shape, at any distance, counts as a swipe
 
   private samples: Sample[] = [];
   private scale = 0;
@@ -66,6 +68,11 @@ export class AirGestureDetector {
   private pinchSince: number | null = null;
   private pinchLatched = false;
 
+  /** Length unit for swipes. In any-hand mode it is clamped so a far-away hand and a very close one both work. */
+  private get unit(): number {
+    return this.anyHand ? Math.min(Math.max(this.scale, 0.08), 0.22) : this.scale;
+  }
+
   /** Feed one camera frame. `p` is null when no hand is visible. */
   update(t: number, p: Pt[] | null): AirGesture | null {
     if (!p) {
@@ -77,7 +84,7 @@ export class AirGestureDetector {
 
     const raw = Math.max(dist(p[0], p[9]), 1.3 * dist(p[5], p[17]));
     this.scale = this.scale ? this.scale * 0.7 + raw * 0.3 : raw;
-    if (this.scale < MIN_HAND) {
+    if (!this.anyHand && this.scale < MIN_HAND) {
       this.status = 'too_far';
       this.samples = [];
       return null;
@@ -88,7 +95,7 @@ export class AirGestureDetector {
     const tip = p[8];
     const prev = this.prevTip;
     this.prevTip = { t, x: tip.x, y: tip.y };
-    const stepSpeed = prev ? dist(prev, tip) / this.scale / Math.max(1, t - prev.t) * 1000 : 0;
+    const stepSpeed = prev ? dist(prev, tip) / this.unit / Math.max(1, t - prev.t) * 1000 : 0;
     if (stepSpeed > GLITCH_SPEED) {
       this.samples = [];
       return null;
@@ -96,7 +103,7 @@ export class AirGestureDetector {
     if (stepSpeed < REST_SPEED) {
       this.restY = tip.y;
       this.strokeSpent = false;
-    } else if (this.last && prev && (tip.y - prev.y) * this.last.dir > TINY_STEP * this.scale) {
+    } else if (this.last && prev && (tip.y - prev.y) * this.last.dir > TINY_STEP * this.unit) {
       this.strokeSpent = false; // moving against the last flick: that stroke is over
     }
     this.samples.push({ t, x: tip.x, y: tip.y, pointing: pose.indexOut });
@@ -167,35 +174,39 @@ export class AirGestureDetector {
     // Walk back from the newest frame to where the current one-way stroke began.
     const n = s.length - 1;
     const stepDy = s[n].y - s[n - 1].y;
-    if (Math.abs(stepDy) / this.scale <= TINY_STEP) return null; // only fire while actually moving
+    if (Math.abs(stepDy) / this.unit <= TINY_STEP) return null; // only fire while actually moving
     const dirY = Math.sign(stepDy);
     let start = n - 1;
     let peak = 0;
     while (start > 0) {
       const dy = s[start].y - s[start - 1].y;
-      if (Math.sign(dy) !== dirY && Math.abs(dy) / this.scale > TINY_STEP) break;
+      if (Math.sign(dy) !== dirY && Math.abs(dy) / this.unit > TINY_STEP) break;
       start--;
     }
     let movingSteps = 0;
     for (let i = start + 1; i <= n; i++) {
-      const step = Math.abs(s[i].y - s[i - 1].y) / this.scale;
+      const step = Math.abs(s[i].y - s[i - 1].y) / this.unit;
       if (step > TINY_STEP) movingSteps++;
       peak = Math.max(peak, step / Math.max(1, s[i].t - s[i - 1].t) * 1000);
     }
     if (movingSteps < 2) return null; // a single jump is the tracker, not a finger
 
-    const { dist: needDist, speed: needSpeed } = SENSITIVITY[this.sensitivity];
-    const dy = (s[n].y - s[start].y) / this.scale;
-    const dx = (s[n].x - s[start].x) / this.scale;
+    const { dist: needDist, speed: needSpeed } = SENSITIVITY[this.anyHand ? 'high' : this.sensitivity];
+    const dy = (s[n].y - s[start].y) / this.unit;
+    const dx = (s[n].x - s[start].x) / this.unit;
     if (Math.abs(dy) < needDist || peak < needSpeed) return null;
     if (Math.abs(dx) > Math.abs(dy) * MAX_SIDEWAYS) return null;
 
     let posed = 0;
     for (let i = start; i <= n; i++) if (s[i].pointing) posed++;
-    if (posed * 2 < n - start + 1) return null;
+    if (!this.anyHand && posed * 2 < n - start + 1) return null;
 
     // Screen y grows downward, so a finger moving up has dirY = -1.
     const dir = -dirY;
+    if (this.forwardOnly && (dir > 0) === this.invert) {
+      this.samples = [];
+      return null;
+    }
     if (this.last && dir === -this.last.dir) {
       const age = t - this.last.t;
       const towardAnchor = Math.abs(s[n].y - this.last.anchorY) < Math.abs(s[start].y - this.last.anchorY);

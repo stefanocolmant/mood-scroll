@@ -19,8 +19,10 @@ function hand(cx: number, cy: number, s: number, pose: Pose): Pt[] {
   return [p(0, 0), ...thumb, ...index, ...rest(0), ...rest(-0.25), ...rest(-0.5)];
 }
 
-function run(frames: Array<[number, number, Pose] | null>, opts: { s?: number; sensitivity?: Sensitivity; invert?: boolean } = {}) {
+function run(frames: Array<[number, number, Pose] | null>, opts: { s?: number; sensitivity?: Sensitivity; invert?: boolean; forwardOnly?: boolean; anyHand?: boolean } = {}) {
   const d = new AirGestureDetector();
+  if (opts.forwardOnly) d.forwardOnly = true;
+  if (opts.anyHand) d.anyHand = true;
   if (opts.sensitivity) d.sensitivity = opts.sensitivity;
   if (opts.invert) d.invert = true;
   const out: string[] = [];
@@ -60,6 +62,36 @@ test('a late return after holding the hand up does not fire Previous', () => {
 });
 test('flicking back on purpose after the hand returned works', () => {
   assert.deepEqual(run([...rest(10), ...stroke(0.7, -0.2, 5), ...stroke(0.5, 0.2, 6), ...rest(30), ...stroke(0.7, 0.15, 5), ...rest(10, 0.85)]), ['next', 'prev']);
+});
+test('forward-only: a downward flick does nothing', () => {
+  assert.deepEqual(run([...rest(10, 0.5), ...stroke(0.5, 0.2, 5), ...rest(20)], { forwardOnly: true }), []);
+});
+test('forward-only: an up flick right after a downward flick still fires', () => {
+  assert.deepEqual(run([...rest(10, 0.5), ...stroke(0.5, 0.2, 5), ...stroke(0.7, -0.2, 5), ...rest(20, 0.5)], { forwardOnly: true }), ['next']);
+});
+test('forward-only: repeated up flicks with fast returns all fire', () => {
+  const cycle = [...stroke(0.7, -0.2, 5), ...stroke(0.5, 0.2, 5), ...rest(6)];
+  assert.deepEqual(run([...rest(10), ...cycle, ...cycle, ...cycle], { forwardOnly: true }), ['next', 'next', 'next']);
+});
+const ANY = { forwardOnly: true, anyHand: true };
+test('any hand: a fist going up scrolls', () => {
+  assert.deepEqual(run([...rest(10, 0.7, 0.6, 'fist'), ...stroke(0.7, -0.15, 5, 0.6, 'fist'), ...rest(10, 0.55, 0.6, 'fist')], ANY), ['next']);
+});
+test('any hand: a very far hand going up scrolls', () => {
+  assert.deepEqual(run([...rest(10), ...stroke(0.7, -0.06, 5), ...rest(10, 0.64)], { ...ANY, s: 0.03 }), ['next']);
+});
+test('any hand: a very close hand needs only a short lift', () => {
+  assert.deepEqual(run([...rest(10), ...stroke(0.7, -0.12, 5), ...rest(10, 0.58)], { ...ANY, s: 0.45 }), ['next']);
+});
+test('any hand: a far hand jittering does nothing', () => {
+  const jitter = Array.from({ length: 120 }, (_, i) => [0.6 + (i % 2) * 0.003, 0.7 + (i % 3) * 0.004, 'point'] as [number, number, Pose]);
+  assert.deepEqual(run(jitter, { ...ANY, s: 0.03 }), []);
+});
+test('any hand: moving down never scrolls', () => {
+  assert.deepEqual(run([...rest(10, 0.4), ...stroke(0.4, 0.3, 5, 0.6, 'open'), ...rest(10, 0.7)], ANY), []);
+});
+test('any hand: a slow drift does nothing', () => {
+  assert.deepEqual(run([...rest(5), ...stroke(0.7, -0.2, 120)], ANY), []);
 });
 test('a slow drift does nothing', () => {
   assert.deepEqual(run([...rest(5), ...stroke(0.7, -0.3, 60)]), []);

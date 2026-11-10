@@ -2,6 +2,7 @@
 // page: only hand-joint coordinates and gesture names ever leave it.
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { AirGestureDetector, type Pt, type Sensitivity } from '@/entrypoints/shared/gesture';
+import { GESTURE_ONLY } from '@/entrypoints/shared/modes';
 
 const FRAME_MS = 33;
 const HUD_MS = 66;
@@ -9,6 +10,8 @@ const HEARTBEAT_MS = 1000;
 
 const video = document.getElementById('cam') as HTMLVideoElement;
 const detector = new AirGestureDetector();
+detector.forwardOnly = GESTURE_ONLY;
+detector.anyHand = GESTURE_ONLY;
 
 function send(msg: Record<string, unknown>) {
   chrome.runtime.sendMessage(msg).catch(() => {});
@@ -28,7 +31,11 @@ async function createTracker(): Promise<HandLandmarker> {
   const options = (delegate: 'GPU' | 'CPU') => ({
     baseOptions: { modelAssetPath: chrome.runtime.getURL('/mediapipe/hand_landmarker.task'), delegate },
     runningMode: 'VIDEO' as const,
-    numHands: 1
+    numHands: 1,
+    // Lower bars so small, far-away hands are still picked up.
+    minHandDetectionConfidence: 0.3,
+    minHandPresenceConfidence: 0.3,
+    minTrackingConfidence: 0.3
   });
   try {
     return await HandLandmarker.createFromOptions(vision, options('GPU'));
@@ -44,7 +51,7 @@ async function main() {
   let stream: MediaStream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 }, facingMode: 'user' },
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 }, facingMode: 'user' },
       audio: false
     });
   } catch (err: any) {
