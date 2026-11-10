@@ -330,7 +330,8 @@ export default defineContentScript({
       ` + (GESTURE_ONLY ? `
         /* Nothing on the page but the picture itself. */
         #app, #app > div, main { background: #000 !important; }
-        main[id^="main-content"] { margin-inline-start: 0 !important; left: 0 !important; width: 100% !important; max-width: none !important; }
+        html, body { overflow-x: clip !important; }
+        main[id^="main-content"] { transform: translateX(var(--ms-shift, 0px)) !important; }
         main[id^="main-content"] * { visibility: hidden !important; }
         main[id^="main-content"] :is(video, canvas, img) { visibility: visible !important; }
         [data-e2e^="feed-navigation"] { display: none !important; }
@@ -365,14 +366,23 @@ export default defineContentScript({
           if (v.volume < 1) v.volume = 1;
         });
       }, 250);
-      // Keep the phone centered on the feed, wherever TikTok lays it out.
+      // Center the feed in the window, however TikTok lays it out.
+      let feedShift = 0;
       setInterval(() => {
         const feed = document.getElementById(CONFIG.scrollContainerId)?.getBoundingClientRect();
         if (!feed?.width) return;
         const root = document.documentElement.style;
-        root.setProperty('--ms-cx', `${feed.left + feed.width / 2}px`);
-        root.setProperty('--ms-h', `${Math.min(feed.height, window.innerHeight) - 16}px`);
+        feedShift += window.innerWidth / 2 - (feed.left + feed.width / 2);
+        root.setProperty('--ms-shift', `${feedShift}px`);
+        root.setProperty('--ms-cx', `${window.innerWidth / 2}px`);
+        root.setProperty('--ms-h', `${Math.min(feed.height, window.innerHeight, window.innerWidth * 17.5 / 9) - 12}px`);
       }, 500);
+
+      // One way only: no scrolling back by trackpad, wheel or keyboard.
+      document.addEventListener('wheel', e => { if (e.deltaY < 0) e.preventDefault(); }, { passive: false, capture: true });
+      document.addEventListener('keydown', e => {
+        if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') { e.preventDefault(); e.stopPropagation(); }
+      }, { capture: true });
     }
 
     // ---------- OVERLAY UI (Shadow DOM) ----------
@@ -1153,6 +1163,7 @@ export default defineContentScript({
 
     function runAirGesture(gesture: string) {
       const video = findPlayingVideo();
+      if (gesture === 'prev' && GESTURE_ONLY) return; // forward only
       if (gesture === 'next' || gesture === 'prev') {
         airPaused = false;
         airPrevHoldUntil = gesture === 'prev' ? Date.now() + 20000 : 0;

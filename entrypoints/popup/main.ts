@@ -8,6 +8,12 @@ async function initGestureOnly() {
   const row = document.getElementById('air-only')!;
   const box = document.getElementById('air-on') as HTMLInputElement;
   row.hidden = false;
+  const openPhone = document.getElementById('open-phone') as HTMLButtonElement;
+  openPhone.hidden = false;
+  openPhone.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'pop_out_side', screenW: screen.availWidth, screenH: screen.availHeight });
+    window.close();
+  });
   box.checked = !!(await chrome.storage.local.get('airEnabled')).airEnabled;
   box.addEventListener('change', () => chrome.storage.local.set({ airEnabled: box.checked }));
 }

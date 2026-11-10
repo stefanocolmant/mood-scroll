@@ -7,7 +7,7 @@ export default defineConfig({
     name: 'Mood Scroll',
     description: 'Pick a mode. We scroll for you.',
     version: '1.0.0',
-    permissions: ['storage', 'activeTab', 'scripting', 'tabs', 'offscreen'],
+    permissions: ['storage', 'activeTab', 'scripting', 'tabs', 'offscreen', 'debugger'],
     // wasm-unsafe-eval: the on-device hand tracker is WebAssembly.
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

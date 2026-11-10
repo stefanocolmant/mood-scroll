@@ -508,6 +508,23 @@ export default defineBackground(() => {
   let airGrace: ReturnType<typeof setTimeout> | null = null;
   let airQueue: Promise<void> = Promise.resolve();
 
+  // Browsers keep a page silent until it has had a real click, and the phone is
+  // meant to run hands-free. A single trusted click in the corner unlocks audio.
+  async function unlockTabSound(tabId: number) {
+    await chrome.tabs.update(tabId, { muted: false }).catch(() => {});
+    const target = { tabId };
+    try {
+      await chrome.debugger.attach(target, '1.3');
+      const click = { x: 1, y: 1, button: 'left', clickCount: 1 };
+      await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...click });
+      await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...click });
+    } catch (err) {
+      console.warn('[AirScroll] sound unlock failed:', err);
+    } finally {
+      chrome.debugger.detach(target).catch(() => {});
+    }
+  }
+
   async function airVisibleTabs(): Promise<number[]> {
     const tabs = await chrome.tabs.query({ active: true, url: 'https://www.tiktok.com/*' });
     const visible: number[] = [];
@@ -574,7 +591,7 @@ export default defineBackground(() => {
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === 'unmute_tab') {
-      if (_sender.tab?.id !== undefined) chrome.tabs.update(_sender.tab.id, { muted: false }).catch(() => {});
+      if (_sender.tab?.id !== undefined) unlockTabSound(_sender.tab.id);
       return;
     }
     if (msg.type === 'air_reconcile') {
@@ -685,10 +702,11 @@ export default defineBackground(() => {
   });
 
   async function handlePopOut(screenW: number, screenH: number) {
-    const width = 440;
-    const height = Math.min(screenH - 60, 900);
-    const left = Math.max(0, screenW - width);
-    const top = 40;
+    // Quarter of the screen on the left, sized to the phone.
+    const width = Math.round(screenW / 4);
+    const height = Math.min(screenH - 20, Math.round(width * 17.5 / 9) + 44);
+    const left = 0;
+    const top = Math.max(0, Math.round((screenH - height) / 2));
     const win = await chrome.windows.create({
       url: 'https://www.tiktok.com/foryou',
       type: 'popup',

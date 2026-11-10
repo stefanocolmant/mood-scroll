@@ -22,7 +22,6 @@ Control TikTok with your hand, through your camera. Point one finger and flick:
 | Gesture | Action |
 |---------|--------|
 | Flick your pointing finger up | Next video |
-| Flick it down | Previous video |
 | Hold up an open palm | Pause / play |
 
 Build from source (below) to get it. The first install opens a page that asks for the camera. Turn it on or off from the toolbar icon. This build is gesture-only (`GESTURE_ONLY` in `entrypoints/shared/modes.ts`): no auto-scroll, no overlays, just the video. Tracking runs on your computer with MediaPipe: video never leaves the extension, and the camera is on only while a TikTok tab is on screen.
